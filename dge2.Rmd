@@ -1739,7 +1739,7 @@ null <- lapply(markers,function(markergene) {
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
-pdf("customcharts")
+pdf("customcharts.pdf")
 par(mar=c(7.1,4.1,4.1,2.1))
 
 message("Genes of interest")
