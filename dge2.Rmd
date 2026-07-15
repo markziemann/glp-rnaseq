@@ -1221,6 +1221,8 @@ mrf <- mr1
 
 ## Presence of marker genes
 
+All charts show log10 transformed data.
+
 Hematopoietic Stem & Progenitor Cells (HSPCs)
 
 HSCs: CD34, CD38 (low), CD90 (Thy1), CD45RA (low), HOPX, MLLT3, AVP
@@ -1292,7 +1294,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1306,7 +1308,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1320,7 +1322,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1334,7 +1336,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1348,7 +1350,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1362,7 +1364,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1376,7 +1378,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1391,7 +1393,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1405,7 +1407,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1419,7 +1421,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1433,7 +1435,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1447,7 +1449,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1461,7 +1463,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1475,7 +1477,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1489,7 +1491,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1503,7 +1505,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1517,7 +1519,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1531,7 +1533,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1545,7 +1547,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1559,7 +1561,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1573,7 +1575,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1587,7 +1589,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1602,7 +1604,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1616,7 +1618,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1630,7 +1632,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1644,7 +1646,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1658,7 +1660,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1692,7 +1694,7 @@ null <- lapply(markers,function(markergene) {
   })
   names(mygex) <- gsub("_"," ",unique(ss$group))
   gene <- gsub("\\$","",markergene)
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1720,7 +1722,7 @@ null <- lapply(markers,function(markergene) {
   gene <- gsub("\\$","",markergene)
   mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPGLP DIAB"))]
   #WTWT DIAB VS GLPGLP DIAB
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1735,7 +1737,7 @@ null <- lapply(markers,function(markergene) {
   gene <- gsub("\\$","",markergene)
   mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPWT DIAB"))]
   #WTWT DIAB VS GLPWT DIAB
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1755,7 +1757,7 @@ null <- lapply(markers,function(markergene) {
   gene <- gsub("\\$","",markergene)
   mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPGLP DIAB"))]
   #WTWT DIAB VS GLPGLP DIAB
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
@@ -1770,7 +1772,7 @@ null <- lapply(markers,function(markergene) {
   gene <- gsub("\\$","",markergene)
   mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPWT DIAB"))]
   #WTWT DIAB VS GLPWT DIAB
-  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 dev.off()
@@ -1779,6 +1781,8 @@ dev.off()
 ```
 
 Now make a heatmap and analyse all marker genes.
+
+Values are log10 transformed.
 
 ```{r,marker_heatmap,fig.height=13,fig.width=9}
 
@@ -1811,7 +1815,7 @@ rownames(mx) <- sapply(strsplit(rownames(mx)," "),"[[",2)
 colnames(mx) <- ss[match(colnames(rpm),ss$sample_name),"preferred_samplename"]
 mx <- mx[,order(colnames(mx))]
 
-heatmap.2( mx, col=colfunc(25),scale="row",Rowv = FALSE, Colv = FALSE,
+heatmap.2( log10(mx+0.1), col=colfunc(25),scale="row",Rowv = FALSE, Colv = FALSE,
  trace="none",margins = c(7,7), cexRow=.5, cexCol=.6,  main="Marker genes")
 
 ```
