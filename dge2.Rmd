@@ -1737,7 +1737,7 @@ null <- lapply(markers,function(markergene) {
   gene <- gsub("\\$","",markergene)
   mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPWT DIAB"))]
   #WTWT DIAB VS GLPWT DIAB
-  boxplot(mygex,log="y",log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
 })
 
