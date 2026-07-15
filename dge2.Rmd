@@ -1701,15 +1701,15 @@ null <- lapply(markers,function(markergene) {
 ```
 
 
-WTWT DIAB VS GLPGLP DIAB
+WTWT DIAB VS GLPGLP DIAB (DGEB)
 and
-WTWT DIAB VS GLPWT DIAB
+WTWT DIAB VS GLPWT DIAB (DGEA)
 
 ```{r,customcharts2}
 
 par(mar=c(7.1,4.1,4.1,2.1))
 
-message("Genes of interest")
+message("Genes of interest in dgeb")
 
 markers <- c("Il36g$","Il1b$")
 null <- lapply(markers,function(markergene) {
@@ -1722,9 +1722,15 @@ null <- lapply(markers,function(markergene) {
   gene <- gsub("\\$","",markergene)
   mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPGLP DIAB"))]
   #WTWT DIAB VS GLPGLP DIAB
+  logFC <- signif(dgeb[grep(markergene,rownames(dgeb)),"log2FoldChange"],3)
+  p_val <- signif(dgeb[grep(markergene,rownames(dgeb)),"pvalue"],3)
+  fdr <- signif(dgeb[grep(markergene,rownames(dgeb)),"padj"],3)
   boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+  mtext(paste("logFC:",logFC," p:",p_val," FDR:",fdr,sep=""))
 })
+
+message("Genes of interest in dgea")
 
 markers <- c("Il9r$", "Nfkbiz$", "Acot1$", "Prok2$", "Cxcl2$", "Hmgcs2$")
 null <- lapply(markers,function(markergene) {
@@ -1737,15 +1743,16 @@ null <- lapply(markers,function(markergene) {
   gene <- gsub("\\$","",markergene)
   mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPWT DIAB"))]
   #WTWT DIAB VS GLPWT DIAB
+  logFC <- signif(dgea[grep(markergene,rownames(dgea)),"log2FoldChange"],3)
+  p_val <- signif(dgea[grep(markergene,rownames(dgea)),"pvalue"],3)
+  fdr <- signif(dgea[grep(markergene,rownames(dgea)),"padj"],3)
   boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+  mtext(paste("logFC:",logFC," p:",p_val," FDR:",fdr,sep=""))
 })
 
 pdf("customcharts.pdf")
 par(mar=c(7.1,4.1,4.1,2.1))
-
-message("Genes of interest")
-
 markers <- c("Il36g$","Il1b$")
 null <- lapply(markers,function(markergene) {
   gex <- rpm[grep(markergene,rownames(rpm)),]
@@ -1757,8 +1764,12 @@ null <- lapply(markers,function(markergene) {
   gene <- gsub("\\$","",markergene)
   mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPGLP DIAB"))]
   #WTWT DIAB VS GLPGLP DIAB
+  logFC <- signif(dgeb[grep(markergene,rownames(dgeb)),"log2FoldChange"],3)
+  p_val <- signif(dgeb[grep(markergene,rownames(dgeb)),"pvalue"],3)
+  fdr <- signif(dgeb[grep(markergene,rownames(dgeb)),"padj"],3)
   boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+  mtext(paste("logFC:",logFC," p:",p_val," FDR:",fdr,sep=""))
 })
 
 markers <- c("Il9r$", "Nfkbiz$", "Acot1$", "Prok2$", "Cxcl2$", "Hmgcs2$")
@@ -1772,8 +1783,12 @@ null <- lapply(markers,function(markergene) {
   gene <- gsub("\\$","",markergene)
   mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPWT DIAB"))]
   #WTWT DIAB VS GLPWT DIAB
+  logFC <- signif(dgea[grep(markergene,rownames(dgea)),"log2FoldChange"],3)
+  p_val <- signif(dgea[grep(markergene,rownames(dgea)),"pvalue"],3)
+  fdr <- signif(dgea[grep(markergene,rownames(dgea)),"padj"],3)
   boxplot(mygex,log="y",las=2,col="white",cex=0,main=gene,ylab="reads per million")
   beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+  mtext(paste("logFC:",logFC," p:",p_val," FDR:",fdr,sep=""))
 })
 dev.off()
 
