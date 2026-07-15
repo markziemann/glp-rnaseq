@@ -1,0 +1,1827 @@
+---
+title: "Analysis of GLP1R KO Bone marrow"
+author: "Mark Ziemann"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    fig_width: 7
+    fig_height: 7
+theme: cosmo
+---
+
+Source: TBA
+
+## Introduction
+
+Here we analyse the effect of transferring GLP1 KO bone marrow into WT mice and vice-versa.
+We have diabetic and control groups aswell.
+
+The sample groups are as follows:
+
+* WTWT_CONT: wild type BM transferred into WT recipients, non-diabetic
+* WTWT_DIAB: wild type BM transferred into WT recipients, diabetic
+* GLPWT_CON: GLP1KO BM transferred into WT recipients, non-diabetic
+* GLPWT_DIAB: GLP1KO BM transferred into WT recipients, diabetic
+* GLPGLP_CONT: GLP1KO BM transferred into GLP1KO recipients, non-diabetic
+* GLPGLP_DIAB: GLP1KO BM transferred into GLP1KO recipients, diabetic
+* WTGLP_CONT: wild type BM transferred into GLP1KO recipients, non-diabetic
+* WTGLP_DIAB: wild type BM transferred into GLP1KO recipients, diabetic
+* WT_CONT: wild type BM, no transfer, non-diabetic
+* WT_DIAB: wild type BM, no transfer, diabetic
+* GLP_CONT: GLP1KO BM, no transfer, non-diabetic
+* GLP_DIAB: GLP1KO BM, no transfer, diabetic
+
+Reads were trimmed using Skewer 0.2.2 (Jiang et al, 2013), discarding bases with quality
+scores <20.
+Trimmed reads were then mapped to the GENCODE M38 mouse transccriptome (Mudge et al, 2025)
+using Kallisto 0.46.2 (Bray et al, 2016).
+
+Genes with mean counts > 10 across all samples in a comparison are classified as detected.
+
+Differential expression is conducted with DESeq2.
+
+Pathway enrichment analysis is conducted with mitch.
+
+Gene sets were obtained from the gene ontology database (q3 2023). Biological process sets were used.
+
+Analysis was conducted in R v4.5.2.
+
+```{r,packages}
+
+suppressPackageStartupMessages({
+    library("zoo")
+    library("dplyr")
+    library("reshape2")
+    library("DESeq2")
+    library("gplots")
+    library("MASS")
+    library("mitch")
+    library("eulerr")
+    library("kableExtra")
+    library("beeswarm")
+    library("network")
+
+})
+
+knitr::opts_chunk$set(dev = 'svg') # set output device to svg
+
+```
+
+## Import read counts
+
+```{r,importdata1}
+
+tmp <- read.table("3col.tsv.gz",header=F)
+x <- as.matrix(acast(tmp, V2~V1, value.var="V3", fun.aggregate = sum))
+x <- as.data.frame(x)
+accession <- sapply((strsplit(rownames(x),"\\|")),"[[",2)
+symbol<-sapply((strsplit(rownames(x),"\\|")),"[[",6)
+x$geneid <- paste(accession,symbol)
+xx <- aggregate(. ~ geneid,x,sum)
+rownames(xx) <- xx$geneid
+xx$geneid = NULL
+xx <- round(xx)
+head(xx)
+
+# remove the version number from the gene IDs
+mus_IDs <- sapply(strsplit(rownames(xx),"\\."),"[[",1)
+mus_gene_symbols <- sapply(strsplit(rownames(xx)," "),"[[",2)
+rownames(xx) <- paste(mus_IDs,mus_gene_symbols,sep=" ")
+
+# keep gene table for later
+mus_gt <- data.frame(paste(mus_IDs,mus_gene_symbols,sep=" "),mus_IDs,mus_gene_symbols)
+colnames(mus_gt) <- c("IDsymbol","ID","symbol")
+
+```
+
+## Sample sheet
+
+Read in and check the sample sheet.
+
+All datasets are included in the samplesheet.
+
+Not all samples in the sample sheet are in the dataset.
+
+There were 47 samples in the dataset and 57 in the samplesheet.
+
+```{r,ss1}
+
+ss <- read.table("samplesheet.tsv", header=TRUE)
+
+#> #which(ss$sample_name %in% colnames(xx))
+which(!colnames(xx) %in% ss$sample_name)
+
+message("Included data")
+intersect(ss$sample_name , colnames(xx) )
+
+message("Missing data")
+setdiff(ss$sample_name , colnames(xx) )
+
+ss2 <- ss[which(ss$sample_name %in% colnames(xx) ) ,]
+
+ss2 %>% kbl(caption = "Sample sheet") %>% kable_paper("hover", full_width = F)
+
+table(ss2$group)
+
+```
+
+Now I will rename the datasets to make it easier for downstream analysis.
+I will also reorder the datasets.
+
+```{r,renamedata}
+
+xx2 <- xx
+colnames(xx2) <- ss2[match(colnames(xx),ss2$sample_name),"preferred_samplename"]
+ss2 <- ss2[order(ss2$preferred_samplename),]
+xx2 <- xx2[,order(colnames(xx2))]
+
+```
+
+## QC analysis
+
+Here I'll look at a few different quality control measures.
+
+```{r,qc1,fig.height=7,fig.width=7}
+
+par(mar=c(5,8,3,1))
+barplot(colSums(xx2),horiz=TRUE,las=1,xlab="num reads")
+colSums(xx2)
+
+```
+
+We have 277M to 50M assigned reads, which is good.
+
+## MDS plot
+
+We can't see any obvious clustering between samples and there could be two outlers GLPGLP_CONT_3 and WT_CONT_2.
+
+```{r,mds1}
+
+cols <- c(rep("tan1",4),rep("violet",4))
+
+par(mar=c(5.1,4.1,4.1,2.1))
+
+plot(cmdscale(dist(t(xx2))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx2))), labels=colnames(xx2) , cex=0.5)
+
+```
+
+## Correlation heatmap
+
+Correlation heatmap shows a slight batch effect with batch A consisting of replicates 1 and 2,
+while batch B consists of replicates 3 and 4.
+
+```{r,cor,fig.height=7,fig.width=7}
+
+heatmap.2(cor(xx2),trace="n",main="Pearson correlation heatmap",cexRow=0.5,cexCol=0.5)
+
+cor(xx2) %>% kbl(caption = "Pearson correlation coefficients") %>% kable_paper("hover", full_width = F)
+
+heatmap.2(cor(xx2,method="s"),trace="n",main="Spearman correlation heatmap",cexRow=0.5,cexCol=0.5)
+
+cor(xx2,method="spearman") %>% kbl(caption = "Spearman correlation coefficients") %>% kable_paper("hover", full_width = F)
+
+```
+
+## Quantification of cell populations
+
+Using data from Nestorowa et al 2016 (A single-cell resolution map of mouse hematopoietic stem and progenitor cell differentiation
+).
+
+https://ashpublications.org/blood/article/128/8/e20/35749/A-single-cell-resolution-map-of-mouse
+https://blood.stemcells.cam.ac.uk/single_cell_atlas.html
+
+```{r,cellpop1,fig.width=9}
+
+blood <- readRDS("hemoprogenitor.Rds")
+genes <- intersect(rownames(xx2), rownames(blood))
+dec <- apply(xx2[genes, , drop=F], 2, function(x) coef(rlm( as.matrix(blood[genes,]), x, maxit =100 ))) *100
+dec <- t(dec/colSums(dec)*100)
+dec <- signif(dec, 3)
+
+# remove negative values
+dec2 <- t(apply(dec,2,function(x) { mymin=min(x) ; if (mymin<0) { x + (mymin * -1) } else { x } } ))
+dec2 <- apply(dec2,2,function(x) {x / sum(x) *100} )
+colfunc <- colorRampPalette(c("blue", "white", "red"))
+
+heatmap.2( dec2, col=colfunc(25),scale="row",
+ trace="none",margins = c(7,7), cexRow=.7, cexCol=.6,  main="cell type abundances")
+
+heatmap.2( dec2, col=colfunc(25),scale="none",
+ trace="none",margins = c(7,7), cexRow=.7, cexCol=.6,  main="cell type abundances")
+
+
+heatmap.2( dec2, col=colfunc(25),scale="none",Colv = FALSE,
+ trace="none",margins = c(7,7), cexRow=.7, cexCol=.6,  main="cell type abundances")
+
+```
+
+Reorder the heatmap.
+
+```{r,cellpop2,fig.width=9}
+
+TRTGRPS=c("WT_CONT",     "WT_DIAB",
+          "GLP_CONT",    "GLP_DIAB",
+          "WTWT_CONT",   "WTWT_DIAB",
+          "GLPWT_CON",   "GLPWT_DIAB",
+          "GLPGLP_CONT", "GLPGLP_DIAB",
+          "WTGLP_CONT",  "WTGLP_DIAB")
+
+trtgrp <- paste(sapply(strsplit(colnames(dec2),"_"),"[[",1),sapply(strsplit(colnames(dec2),"_"),"[[",2),sep="_")
+
+dec2l <- lapply(TRTGRPS, function(x) {  dec2[,trtgrp==x] } )
+names(dec2l) <- TRTGRPS
+dec2o <- do.call(cbind,dec2l)
+
+heatmap.2( dec2o, col=colfunc(25),scale="none",Colv = FALSE,
+ trace="none",margins = c(7,7), cexRow=.7, cexCol=.6,  main="cell type abundances")
+
+```
+
+Make some boxplots and compare groups.
+
+```{r,cellpop3}
+
+par(mar=c(7.5,4,3,1))
+
+null <- lapply(1:nrow(dec2o), function(i) {
+  CELLNAME <- rownames(dec2o)[i]
+  boxplot(lapply(dec2l,function(x) { x[i,]} ),cex=0,col="white",las=2,main=CELLNAME,ylab="Est cell proportion")
+  beeswarm(lapply(dec2l,function(x) { x[i,]} ),add=TRUE,cex=2,col="darkgray", pch=19)
+})
+
+```
+
+```{r,cellpop4}
+
+par(mar=c(5,10,3,1))
+boxplot(t(dec2[order(rowMeans(dec2)),]),horizontal=TRUE,las=1, xlab="estimated cell proportion (%)")
+par(mar = c(5.1, 4.1, 4.1, 2.1))
+heatmap.2( cor(dec2),trace="none",scale="none", margins = c(7,7))
+heatmap.2( cor(t(dec2)),trace="none",scale="none", margins = c(8,8))
+par(mar=c(5,10,3,1))
+barplot(apply(dec2,1,sd),horiz=TRUE,las=1,xlab="SD of cell proportions (%)")
+which(apply(dec2,1,sd)>4)
+
+saveRDS(dec2,"cellcomposition.Rds")
+
+signif(t(dec2),3) %>%
+  kbl(caption = "Cell population estimates") %>%
+  kable_paper("hover", full_width = F)
+
+sdec2 <- scale(dec2)
+
+ssblood <- t(sdec2[rownames(sdec2) %in% c("Monocytes","Erythroid","Megakaryocytes"),])
+
+ssblood %>%
+  kbl(caption = "Cell types that will be adjusted for") %>%
+  kable_paper("hover", full_width = F)
+
+ss2 <- cbind(ss2,ssblood)
+
+```
+
+Based on these results, we need to correct for Neutrophils.LD, B.Memory, T.CD4.Naive, Monocytes.C and T.CD4.Memory cells in that order.
+
+## Analysis of differential gene expression
+
+I will set up the following comparisons:
+
+1. WT_CONT vs WT_DIAB: effect of diabetes in WT, no BM transfer
+2. GLP_CONT vs GLP_DIAB: effect of diabetes in GLP1RKO, no BM transfer
+3. WT_CONT vs GLP_CONT: effect of GLP1RKO in non-diabetic mice
+4. WT_DIAB vs GLP_DIAB: effect of GLP1RKO in non-diabetic mice
+
+5. WT_CONT vs WTWT_CONT: effect of the BM transfer process in non-diabetic animals
+6. WT_DIAB vs WTWT_DIAB: effect of the BM transfer process in diabetic animals
+
+7. WTWT_DIAB vs GLPWT_DIAB: effect of putting GLP1RKO BM in WT diabetic mice
+8. GLPGLP_DIAB vs WTGLP_DIAB: effect of putting WT BM in GLP1RKO diabetic mice
+
+The six possible comparisons of diabetic BM transfer groups.
+A. WTWT_DIAB vs GLPWT_DIAB
+B. WTWT_DIAB vs GLPGLP_DIAB
+C. WTWT_DIAB vs WTGLP_DIAB
+D. GLPWT_DIAB vs GLPGLP_DIAB
+E. GLPWT_DIAB vs WTGLP_DIAB
+F. GLPGLP_DIAB vs WTGLP_DIAB
+
+* WTWT_CONTL: wild type BM transferred into WT recipients, non-diabetic
+* WTWT_DIAB: wild type BM transferred into WT recipients, diabetic
+* GLPWT_CON: GLP1KO BM transferred into WT recipients, non-diabetic
+* GLPWT_DIAB: GLP1KO BM transferred into WT recipients, diabetic
+* GLPGLP_CONT: GLP1KO BM transferred into GLP1KO recipients, non-diabetic
+* GLPGLP_DIAB: GLP1KO BM transferred into GLP1KO recipients, diabetic
+* WTGLP_CONT: wild type BM transferred into GLP1KO recipients, non-diabetic
+* WTGLP_DIAB: wild type BM transferred into GLP1KO recipients, diabetic
+* WT_CONT: wild type BM, no transfer, non-diabetic
+* WT_DIAB: wild type BM, no transfer, diabetic
+* GLP_CONT: GLP1KO BM, no transfer, non-diabetic
+* GLP_DIAB: GLP1KO BM, no transfer, diabetic
+
+### DGE1 - effect of diabetes in WT, no BM transfer
+
+First we will look at control vs mutant with no filtering for low reads.
+Then we remove genes with fewer than 10 reads per sample on average and rerun DESeq2.
+
+```{r,dge1}
+
+ss3 <- subset(ss2,group == "WT_CONT" | group == "WT_DIAB")
+ss3$case <- factor(as.numeric(grepl("DIAB",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+#dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by diabetes in WT mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dge1 <- dge
+
+```
+
+#### Make some plots
+
+```{r,plots1}
+
+maplot <- function(de,contrast_name) {
+  sig <-subset(de, padj < 0.05 )
+  up <-rownames(subset(de, padj < 0.05 & log2FoldChange > 0))
+  dn <-rownames(subset(de, padj < 0.05 & log2FoldChange < 0))
+  GENESUP <- length(up)
+  GENESDN <- length(dn)
+  DET=nrow(de)
+  SUBHEADER = paste(GENESUP, "up, ", GENESDN, "down", DET, "detected")
+  ns <-subset(de, padj > 0.05 )
+  plot(log2(de$baseMean),de$log2FoldChange, 
+       xlab="log2 basemean", ylab="log2 foldchange",
+       pch=19, cex=0.5, col="dark gray",
+       main=contrast_name, cex.main=1)
+  points(log2(sig$baseMean),sig$log2FoldChange,
+         pch=19, cex=0.5, col="red")
+  mtext(SUBHEADER,cex = 1)
+}
+
+make_volcano <- function(de,name) {
+    sig <- subset(de,padj<0.05)
+    N_SIG=nrow(sig)
+    N_UP=nrow(subset(sig,log2FoldChange>0))
+    N_DN=nrow(subset(sig,log2FoldChange<0))
+    DET=nrow(de)
+    HEADER=paste(N_SIG,"@5%FDR,", N_UP, "up", N_DN, "dn", DET, "detected")
+    plot(de$log2FoldChange,-log10(de$pval),cex=0.5,pch=19,col="darkgray",
+        main=name, xlab="log2 FC", ylab="-log10 pval")
+    mtext(HEADER)
+    grid()
+    points(sig$log2FoldChange,-log10(sig$pval),cex=0.5,pch=19,col="red")
+}
+
+make_heatmap <- function(de,name,myss,mx,n=30){
+  colfunc <- colorRampPalette(c("blue", "white", "red"))
+  values <- myss$quickdash
+  f <- colorRamp(c("yellow", "orange"))
+  rr <- range(values)
+  svals <- (values-rr[1])/diff(rr)
+  colcols <- rgb(f(svals)/255)
+  mxn <- mx/rowSums(mx)*1000000
+  x <- mxn[which(rownames(mxn) %in% rownames(head(de,n))),]
+  heatmap.2(as.matrix(x),trace="none",col=colfunc(25),scale="row", margins = c(7,15), cexRow=0.9, cexCol=0.9,
+    main=paste("Top ranked",n,"genes in",name) )
+}
+
+maplot(dge,"ctrl vs diab")
+make_volcano(dge,"ctrl vs diab")
+make_heatmap(dge,"ctrl vs diab",ss3,xx3f,n=30)
+
+```
+
+### DGE2 - GLP_CONT vs GLP_DIAB: effect of diabetes in GLP1RKO, no BM transfer
+
+```{r,dge2}
+
+ss3 <- subset(ss2,group == "GLP_CONT" | group == "GLP_DIAB")
+ss3$case <- factor(as.numeric(grepl("DIAB",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by diabetes in GLP1RKO mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dge2 <- dge
+
+maplot(dge,"ctrl vs diab (GLP1RKO)")
+make_volcano(dge,"ctrl vs diab (GLP1RKO)")
+make_heatmap(dge,"ctrl vs diab (GLP1RKO)",ss3,xx3f,n=30)
+
+```
+
+### DGE3 - WT_CONT vs GLP_CONT: effect of GLP1RKO in non-diabetic mice
+
+Hmga1b was upregulated, but the most prominent paralog by baseMean expression, Hmga1 was downregulated.
+These genes are involved in "regulation of gene transcription, integration of retroviruses into chromosomes,
+and the metastatic progression of cancer cells" according to GeneCards.
+
+```{r,dge3}
+
+ss3 <- subset(ss2,group == "WT_CONT" | group == "GLP_CONT")
+ss3$case <- factor(as.numeric(grepl("GLP",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by GLPR1KO in non-diabetic mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dge3 <- dge
+
+maplot(dge,"WT vs GLP1RKO (ctrl)")
+make_volcano(dge,"WT vs GLP1RKO (ctrl)")
+make_heatmap(dge,"WT vs GLP1RKO (ctrl)",ss3,xx3f,n=30)
+
+```
+
+### DGE4 - WT_DIAB vs GLP_DIAB: effect of GLP1RKO in diabetic mice
+
+```{r,dge4}
+
+ss3 <- subset(ss2,group == "WT_DIAB" | group == "GLP_DIAB")
+ss3$case <- factor(as.numeric(grepl("GLP",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by GLPR1KO in diabetic mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dge4 <- dge
+
+maplot(dge,"WT vs GLP1RKO (diab)")
+make_volcano(dge,"WT vs GLP1RKO (diab)")
+make_heatmap(dge,"WT vs GLP1RKO (diab)",ss3,xx3f,n=30)
+
+```
+
+### DGE5 - WT_CONT vs WTWT_CONT: effect of the BM transfer process in non-diabetic animals
+
+```{r,dge5}
+
+ss3 <- subset(ss2,group == "WT_CONT" | group == "WTWT_CONT")
+ss3$case <- factor(as.numeric(grepl("WTWT",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by BM transfer in WT non-diabetic mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dge5 <- dge
+
+maplot(dge,"WT vs WTWT (ctrl)")
+make_volcano(dge,"WT vs WTWT (ctrl)")
+make_heatmap(dge,"WT vs WTWT (ctrl)",ss3,xx3f,n=30)
+
+```
+
+
+### DGE6 - WT_DIAB vs WTWT_DIAB: effect of the BM transfer process in diabetic animals
+
+```{r,dge6}
+
+ss3 <- subset(ss2,group == "WT_DIAB" | group == "WTWT_DIAB")
+ss3$case <- factor(as.numeric(grepl("WTWT",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by BM transfer in WT diabetic mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dge6 <- dge
+
+maplot(dge,"WT vs WTWT (diab)")
+make_volcano(dge,"WT vs WTWT (diab)")
+make_heatmap(dge,"WT vs WTWT (diab)",ss3,xx3f,n=30)
+
+```
+
+
+### DGEA - WTWT_DIAB vs GLPWT_DIAB: Effect of transfering GLP1RKO BM into diabetic WT mice
+
+```{r,dgea}
+
+ss3 <- subset(ss2,group == "WTWT_DIAB" | group == "GLPWT_DIAB")
+ss3$case <- factor(as.numeric(grepl("GLPWT",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by transfering GLP1RKO BM into non-diabetic WT mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dgea <- dge
+
+maplot(dge,"WTWT vs GLPWT (diab)")
+make_volcano(dge,"WTWT vs GLPWT (diab)")
+make_heatmap(dge,"WTWT vs GLPWT (diab)",ss3,xx3f,n=30)
+
+```
+
+### DGEB - WTWT_DIAB vs GLPGLP_DIAB: Effect of GLP1RKO in diabetic BM transfer mice
+
+```{r,dgeb}
+
+ss3 <- subset(ss2,group == "WTWT_DIAB" | group == "GLPGLP_DIAB")
+ss3$case <- factor(as.numeric(grepl("GLPGLP_DIAB",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by GLP1RKO in diabetic BM transfer mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dgeb <- dge
+
+maplot(dge,"WTWT_DIAB vs GLPGLP_DIAB")
+make_volcano(dge,"WTWT_DIAB vs GLPGLP_DIAB")
+make_heatmap(dge,"WTWT_DIAB vs GLPGLP_DIAB",ss3,xx3f,n=30)
+
+```
+
+### DGEC - WTWT_DIAB vs WTGLP_DIAB recipient host effect
+
+```{r,dgec}
+
+ss3 <- subset(ss2,group == "WTWT_DIAB" | group == "WTGLP_DIAB")
+ss3$case <- factor(as.numeric(grepl("WTGLP_DIAB",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by GLP1RKO host in diabetic BM transfer mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dgec <- dge
+
+maplot(dge,"WTWT_DIAB vs WTGLP_DIAB")
+make_volcano(dge,"WTWT_DIAB vs WTGLP_DIAB")
+make_heatmap(dge,"WTWT_DIAB vs WTGLP_DIAB",ss3,xx3f,n=30)
+
+```
+
+### DGED - GLPWT_DIAB vs GLPGLP_DIAB donor host effects
+
+```{r,dged}
+
+ss3 <- subset(ss2,group == "GLPWT_DIAB" | group == "GLPGLP_DIAB")
+ss3$case <- factor(as.numeric(grepl("GLPGLP_DIAB",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by wt host in diabetic BM transfer mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dged <- dge
+
+maplot(dge,"GLPWT_DIAB vs GLPGLP_DIAB")
+make_volcano(dge,"GLPWT_DIAB vs GLPGLP_DIAB")
+make_heatmap(dge,"GLPWT_DIAB vs GLPGLP_DIAB",ss3,xx3f,n=30)
+
+```
+
+
+### DGEE - GLPWT_DIAB vs WTGLP_DIAB 
+
+```{r,dgee}
+
+ss3 <- subset(ss2,group == "GLPWT_DIAB" | group == "WTGLP_DIAB")
+ss3$case <- factor(as.numeric(grepl("WTGLP_DIAB",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by wt host in diabetic BM transfer mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dgee <- dge
+
+maplot(dge,"GLPWT_DIAB vs WTGLP_DIAB")
+make_volcano(dge,"GLPWT_DIAB vs WTGLP_DIAB")
+make_heatmap(dge,"GLPWT_DIAB vs WTGLP_DIAB",ss3,xx3f,n=30)
+
+```
+
+
+### DGEF - WTGLP_DIAB vs GLPGLP_DIAB
+
+```{r,dgef}
+
+ss3 <- subset(ss2,group == "WTGLP_DIAB" | group == "GLPGLP_DIAB")
+ss3$case <- factor(as.numeric(grepl("GLPGLP_DIAB",ss3$group)))
+
+xx3 <- xx2[,which(colnames(xx2) %in% ss3$preferred_samplename)]
+xx3f <-  xx3[rowMeans(xx3)>10,]
+rpm3 <- apply(xx3f,2,function( x ) { x/sum(x) * 1e6  } )
+
+plot(cmdscale(dist(t(xx3f))), xlab="Coordinate 1", ylab="Coordinate 2",
+  type = "p",bty="n",pch=19, cex=0 )
+text(cmdscale(dist(t(xx3f))), labels=colnames(xx3f) , cex=0.8)
+
+dds <- DESeqDataSetFromMatrix(countData = xx3f , colData = ss3, design = ~ Monocytes + Erythroid + Megakaryocytes + case )
+res <- DESeq(dds)
+z<- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+head(dge,20) %>%
+  kbl(caption = "Top gene expression changes caused by donor GLP1RKO in GLP1RKO diabetic mice") %>%
+  kable_paper("hover", full_width = F)
+
+nrow(dge)
+nrow(subset(dge,padj<0.05))
+dgef <- dge
+
+maplot(dge,"WTGLP_DIAB vs GLPGLP_DIAB")
+make_volcano(dge,"WTGLP_DIAB vs GLPGLP_DIAB")
+make_heatmap(dge,"WTGLP_DIAB vs GLPGLP_DIAB",ss3,xx3f,n=30)
+
+```
+
+## Pathway enrichment
+
+Here I'm using the mitch package and mouse gene pathways from Gene Ontology Biological Process downloaded from MSigDB
+(m5.go.bp.v2025.1.Mm.symbols.gmt).
+
+```{r,gosets}
+
+gobp <- gmt_import("../ref/m5.go.bp.v2025.1.Mm.symbols.gmt")
+
+gt <- as.data.frame(rownames(xx))
+gt$gene <- sapply(strsplit(gt[,1]," "),"[[",2)
+
+```
+
+#### DGE1
+
+```{r,m1}
+
+m1 <- mitch_import(dge1, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8,minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top gene pathway differences caused by Diabetes") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="Ctl vs diab (WT)",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dge1.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dge1.html",overwrite=TRUE)
+}
+
+```
+
+#### DGE2
+
+```{r,m2}
+
+m1 <- mitch_import(dge2, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8,minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top gene pathway differences caused by diabetes in GLP1KO") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="Ctl vs diab (GLP1RKO)",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dge2.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dge2.html",overwrite=TRUE)
+}
+mr2 <- mr1
+
+```
+
+#### DGE3
+
+```{r,m3}
+
+m1 <- mitch_import(dge3, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8,minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top gene pathway differences caused by GLP1RKO in non-diabetic mice") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="WT vs GLP1RKO (non-diabetic)",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dge3.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dge3.html",overwrite=TRUE)
+}
+mr3 <- mr1
+
+```
+
+#### DGE4
+
+```{r,m4}
+
+m1 <- mitch_import(dge4, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8,minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top gene pathway differences caused by GLP1RKO in diabetic mice") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="WT vs GLP1RKO (diabetic)",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dge4.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dge4.html",overwrite=TRUE)
+}
+mr4 <- mr1
+
+```
+
+#### DGE5
+
+```{r,m5}
+
+m1 <- mitch_import(dge5, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8,minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top gene pathway differences caused by BM transfer process in non-diabetic animals") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="WT_CONT vs WTWT_CONT (non-diabetic)",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dge5.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dge5.html",overwrite=TRUE)
+}
+mr5 <- mr1
+
+```
+
+#### DGE6
+
+```{r,m6}
+
+m1 <- mitch_import(dge6, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8,minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top gene pathway differences caused by BM transfer process in diabetic animals") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="WT_DIAB vs WTWT_DIAB (diabetic)",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dge6.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dge6.html",overwrite=TRUE)
+}
+mr6 <- mr1
+
+```
+
+#### DGE-A 
+
+```{r,mA}
+
+m1 <- mitch_import(dgea, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8,minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top pathways: Effect of transfering GLP1RKO BM into diabetic WT mice") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="WTWT_DIAB vs GLPWT_DIAB",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dgea.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dgea.html",overwrite=TRUE)
+}
+mra <- mr1
+
+```
+
+
+#### DGE-B
+
+```{r,mB}
+
+m1 <- mitch_import(dgeb, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8, minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top pathways: Effect of GLP1RKO in diabetic BM transfer mice") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="WTWT_DIAB vs GLPGLP_DIAB",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dgeb.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dgeb.html",overwrite=TRUE)
+}
+mrb <- mr1
+
+```
+
+#### DGE-C 
+
+```{r,mC}
+
+m1 <- mitch_import(dgec, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8, minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top pathways: WTWT_DIAB vs WTGLP_DIAB recipient host effect") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="WTWT_DIAB vs WTGLP_DIAB recipient host effect",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dgec.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dgec.html",overwrite=TRUE)
+}
+mrc <- mr1
+
+```
+
+
+#### DGE-D
+
+```{r,mD}
+
+m1 <- mitch_import(dged, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8, minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top pathways: GLPWT_DIAB vs GLPGLP_DIAB donor host effects") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="GLPWT_DIAB vs GLPGLP_DIAB donor host effects",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dged.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dged.html",overwrite=TRUE)
+}
+mrd <- mr1
+
+```
+
+
+#### DGE-E
+
+```{r,mE}
+
+m1 <- mitch_import(dgee, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8, minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top pathways: GLPWT_DIAB vs WTGLP_DIAB") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="GLPWT_DIAB vs WTGLP_DIAB",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dgee.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dgee.html",overwrite=TRUE)
+}
+mre <- mr1
+
+```
+
+#### DGE-F
+
+```{r,mF}
+
+m1 <- mitch_import(dgef, DEtype="deseq2",geneTable=gt)
+mr1 <- mitch_calc(m1, gobp, priority="effect",cores=8, minsetsize=5)
+mres1 <-  subset(mr1$enrichment_result,p.adjustANOVA < 0.01 )
+mres1_top <- head(subset(mres1,p.adjustANOVA < 0.05 ),30)
+mres1_top <-  mres1_top[order(-mres1_top$s.dist),]
+
+mres1_top %>%
+  kbl(caption = "Top pathways: WTGLP_DIAB vs GLPGLP_DIAB") %>%
+  kable_paper("hover", full_width = F)
+
+top <- mres1_top
+up <- head(subset(top,s.dist>0),20)
+dn <- head(subset(top,s.dist<0),20)
+top <- rbind(up,dn)
+vec=top$s.dist
+names(vec)=top$set
+names(vec) <- gsub("_"," ",names(vec))
+vec <- vec[order(vec)]
+par(mar=c(5,27,3,3))
+barplot(abs(vec),col=sign(-vec)+3,horiz=TRUE,las=1,cex.names=0.65,main="WTGLP_DIAB vs GLPGLP_DIAB",xlab="ES")
+grid()
+
+if ( ! file.exists("mitch_dgef.html") ) {
+  mitch_report(res=mr1,outfile="mitch_dgef.html",overwrite=TRUE)
+}
+mrf <- mr1
+
+```
+
+
+## Presence of marker genes
+
+Hematopoietic Stem & Progenitor Cells (HSPCs)
+
+HSCs: CD34, CD38 (low), CD90 (Thy1), CD45RA (low), HOPX, MLLT3, AVP
+MPPs: CD34, FLT3, CD38 (low)
+CMPs/GMPs/MEPs: CD34, CD38, IL3RA, CD135 (FLT3)
+
+Erythroid Lineage
+
+Early: GATA1, KLF1, TAL1
+Proerythroblasts → Reticulocytes: GYPA (CD235a), HBA1, HBA2, HBB, ALAS2, EPB42, ANK1
+Marker of commitment: TFRC (CD71)
+
+Megakaryocyte Lineage
+
+ITGA2B (CD41), GP1BA (CD42b), PF4, VWF, PPBP, TUBB1, MYH9
+
+Myeloid / Granulocyte Lineage
+
+Granulocyte progenitors: MPO, ELANE, AZU1, PRTN3
+Neutrophils: S100A8, S100A9, CSF3R (CD114), FCGR3B (CD16b), CXCR2
+Eosinophils: IL5RA, SIGLEC8, CLC, PRG2
+Basophils/Mast cells: TPSAB1, CPA3, HDC, MS4A2
+
+Monocyte Lineage
+
+LYZ, CD14, FCGR1A (CD64), CSF1R, S100A8, VCAN, FCN1
+Classical mono: CD14 (high), FCGR3A (low)
+Non-classical: FCGR3A (CD16, high), CD14 (low), CX3CR1
+
+Dendritic Cells
+
+pDCs: IL3RA (CD123), CLEC4C (BDCA-2), TCF4, LILRA4
+cDC1s: CLEC9A, XCR1, CADM1
+cDC2s: CD1C, FCER1A, CLEC10A
+
+B Lymphoid Lineage
+
+Pro-B / Pre-B: DNTT (TdT), RAG1, RAG2, VPREB1, IGLL1
+Immature/Mature B: CD19, MS4A1 (CD20), PAX5, EBF1, CD79A, CD79B, IGHM
+Plasma cells: IGHG1, MZB1, XBP1, PRDM1, SDC1 (CD138)
+
+T / NK Lineage (small populations in marrow)
+
+T cells: CD3D, CD3E, CD3G, TRAC, TRBC
+NK cells: NCAM1 (CD56), KLRD1 (CD94), NKG7, GNLY, GZMB, TYROBP
+ILCs: IL7R, KLRB1
+
+Stromal / Non-hematopoietic
+
+MSCs: NT5E (CD73), THY1 (CD90), ENG (CD105), CXCL12, LEPR
+Endothelial: PECAM1 (CD31), CDH5 (VE-cadherin), KDR, VWF
+Osteoblasts: RUNX2, SP7 (Osterix), BGLAP, COL1A1
+Adipocytes: ADIPOQ, FABP4, PPARG
+
+```{r,markergenes}
+
+par(mar=c(7.1,4.1,4.1,2.1))
+
+rpm <- apply(xx,2,function(x) { x/sum(x) * 1e6 } )
+
+message("HSC markers: Cd34, Cd38, Thy1, Ptprc, Hopx, Mllt3, Avp")
+
+markers <- c("Cd34$","Cd38$","Thy1$","Ptprc$","Hopx$","Mllt3","Avp$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("MPP markers: CD34, FLT3, CD38 (low)")
+markers <- c("Cd34$", "Flt3$", "Cd38$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("CMPs/GMPs/MEPs: CD34, CD38, IL3RA, FLT3")
+markers <- c("Cd34$", "Cd38$", "Il3ra$", "Flt3$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Erythroid early lineage")
+markers <- c("Gata1$", "Klf1$", "Tal1$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Reticulocytes: GYPA (CD235a), HBA1, HBA2, HBB, ALAS2, EPB42, ANK1")
+markers <- c("Gypa$","Hba-a1$", "Hbb-y$", "Alas2$", "Epb42$", "Ank1$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Marker of commitment: TFRC (CD71)")
+markers <- c("Tfrc$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Megakaryocyte Lineage markers: ITGA2B (CD41), GP1BA (CD42b), PF4, VWF, PPBP, TUBB1, MYH9")
+markers <- c("Itga2b$","Gp1ba$","Pf4$","Vwf$","Ppbp$","Tubb1$","Myh9$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Myeloid / Granulocyte Lineage")
+message("Granulocyte progenitors: MPO, ELANE, AZU1, PRTN3")
+markers <- c("Mpo$","Elane$","Tacc2$","Prtn3$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Neutrophils: S100A8, S100A9, CSF3R (CD114), FCGR3B (CD16b), CXCR2")
+markers <- c("S100a8$","S100a9$","Csf3r$","Fcgr4$","Cxcr2$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Eosinophils: IL5RA, SIGLEC8, CLC, PRG2")
+markers <- c("Il5ra$","Siglece$","Prg2$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Basophils/Mast cells: TPSAB1, CPA3, HDC, MS4A2")
+markers <- c("Tpsab1$","Cpa3$","Hdc$","Ms4a2$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Monocyte Lineage: LYZ, CD14, FCGR1A (CD64), CSF1R, S100A8, VCAN, FCN1")
+markers <- c("Lyz1$","Lyz2$","Cd14$","Fcgr1$","Csf1r$","S100a8$","Vcan$","Fcnb$","Fcna$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Monocyte Classical mono: CD14 (high), FCGR3A (low)")
+markers <- c("Cd14$","Fcgr4")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Monocyte Non-classical: FCGR3A (CD16, high), CD14 (low), CX3CR1")
+markers <- c("Fcgr4$","Cd14$","Cx3cr1$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Dendritic Cells pDCs: IL3RA (CD123), CLEC4C (BDCA-2), TCF4, LILRA4")
+markers <- c("Il3ra$","Clec4b1$","Clec4b2$","Tcf4$","Lilra6$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Dendritic Cells cDC1s: CLEC9A, XCR1, CADM1")
+markers <- c("Clec9a$","Xcr1$","Cadm1$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Dendritic Cells cDC2s: CD1C, FCER1A, CLEC10A")
+markers <- c("Fcer1a$","Clec10a")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("B Lymphoid Lineage Pro-B / Pre-B: DNTT (TdT), RAG1, RAG2, VPREB1, IGLL1")
+markers <- c("Dntt$","Rag1$","Rag2$","Vpreb1a$","Vpreb1b$","Igll1$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("B Lymphoid Lineage Immature/Mature B: CD19, MS4A1 (CD20), PAX5, EBF1, CD79A, CD79B, IGHM")
+markers <- c("Cd19$","Ms4a1$","Ebf1$","Cd79a$","Cd79b$","Ighm$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("B Lymphoid Lineage Plasma cells: IGHG1, MZB1, XBP1, PRDM1, SDC1 (CD138)")
+markers <- c("Ighg1$","Mzb1$","Xbp1$","Prdm1$","Sdc1$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("T / NK Lineage (small populations in marrow) T cells: CD3D, CD3E, CD3G, TRAC, TRBC")
+markers <- c("Cd3d$","Cd3e$","Cd3g$","Trac$","Trbc1$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("T / NK Lineage (sml pop) NK cells: NCAM1 (CD56), KLRD1 (CD94), NKG7, GNLY, GZMB, TYROBP")
+markers <- c("Ncam1$","Klrd1$","Nkg7$","Tyrobp$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+
+message("T / NK Lineage (sml pop) ILCs: IL7R, KLRB1")
+markers <- c("Il7r$","Klrb1a$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Stromal / Non-hematopoietic MSCs: NT5E (CD73), THY1 (CD90), ENG (CD105), CXCL12, LEPR")
+markers <- c("Nt5e$","Thy1$","Eng$","Cxcl12$","Lepr$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Endothelial: PECAM1 (CD31), CDH5 (VE-cadherin), KDR, VWF")
+markers <- c("Pecam1$","Cdh5$","Kdr","Vwf")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Osteoblasts: RUNX2, SP7 (Osterix), BGLAP, COL1A1")
+markers <- c("Runx2$","Sp7$","Bglap$","Col1a1$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+message("Adipocytes: ADIPOQ, FABP4, PPARG")
+markers <- c("Adipoq$","Fabp4$","Pparg$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+```
+
+Now make some charts for specific genes.
+
+WTWT DIAB VS GLPGLP DIAB:
+Il36g ENSMUSG00000044103
+Il1b ENSMUSG00000027398
+
+WTWT DIAB VS GLPWT DIAB:
+Il9r ENSMUSG00000020279
+Nfkbiz ENSMUSG00000035356
+Acot1 ENSMUSG00000072949
+Prok2 ENSMUSG00000030069
+Cxcl2 ENSMUSG00000058427
+Hmgcs2 ENSMUSG00000027875
+
+```{r,customcharts1}
+
+par(mar=c(7.1,4.1,4.1,2.1))
+
+message("Genes of interest")
+markers <- c("Il36g$","Il1b$", "Il9r$", "Nfkbiz$", "Acot1$", "Prok2$", "Cxcl2$", "Hmgcs2$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+```
+
+
+WTWT DIAB VS GLPGLP DIAB
+and
+WTWT DIAB VS GLPWT DIAB
+
+```{r,customcharts2}
+
+par(mar=c(7.1,4.1,4.1,2.1))
+
+message("Genes of interest")
+
+markers <- c("Il36g$","Il1b$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPGLP DIAB"))]
+  #WTWT DIAB VS GLPGLP DIAB
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+markers <- c("Il9r$", "Nfkbiz$", "Acot1$", "Prok2$", "Cxcl2$", "Hmgcs2$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPWT DIAB"))]
+  #WTWT DIAB VS GLPWT DIAB
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+pdf("customcharts")
+par(mar=c(7.1,4.1,4.1,2.1))
+
+message("Genes of interest")
+
+markers <- c("Il36g$","Il1b$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPGLP DIAB"))]
+  #WTWT DIAB VS GLPGLP DIAB
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+
+markers <- c("Il9r$", "Nfkbiz$", "Acot1$", "Prok2$", "Cxcl2$", "Hmgcs2$")
+null <- lapply(markers,function(markergene) {
+  gex <- rpm[grep(markergene,rownames(rpm)),]
+  mygex <- lapply(unique(ss$group),function(label) {
+    samples <- subset(ss,group==label)$sample_name
+    gex[names(gex) %in% samples]
+  })
+  names(mygex) <- gsub("_"," ",unique(ss$group))
+  gene <- gsub("\\$","",markergene)
+  mygex <- mygex[which(names(mygex) %in% c("WTWT DIAB","GLPWT DIAB"))]
+  #WTWT DIAB VS GLPWT DIAB
+  boxplot(mygex,las=2,col="white",cex=0,main=gene,ylab="reads per million")
+  beeswarm(mygex,add=TRUE,cex=2,col="darkgray",pch=19)
+})
+dev.off()
+
+
+```
+
+Now make a heatmap and analyse all marker genes.
+
+```{r,marker_heatmap,fig.height=13,fig.width=9}
+
+all_marker_genes <- c("Adipoq","Alas2","Ank1","Avp","Bglap","Cadm1","Cd14","Cd19",
+  "Cd34","Cd38","Cd3d","Cd3e","Cd3g","Cd79a","Cd79b","Cdh5","Clec10a","Clec4b1",
+  "Clec4b2","Clec9a","Col1a1","Cpa3","Csf1r","Csf3r","Cx3cr1","Cxcl12","Cxcr2",
+  "Dntt","Ebf1","Elane","Eng","Epb42","Fabp4","Fcer1a","Fcgr1","Fcgr4","Fcna",
+  "Fcnb","Flt3","Gata1","Gp1ba","Gypa","Hba-a1","Hbb-y","Hdc","Hopx","Ighg1",
+  "Ighm","Igll1","Il3ra","Il5ra","Il7r","Itga2b","Kdr","Klf1","Klrb1a","Klrd1",
+  "Lepr","Lilra6","Lyz1","Lyz2","Mllt3","Mpo","Ms4a1","Ms4a2","Myh9","Mzb1",
+  "Ncam1","Nkg7","Nt5e","Pecam1","Pf4","Pparg","Ppbp","Prdm1","Prg2","Prtn3",
+  "Ptprc","Rag1","Rag2","Runx2","S100a8","S100a9","Sdc1","Siglece","Sp7","Tacc2",
+  "Tal1","Tcf4","Tfrc","Thy1","Tpsab1","Trac","Trbc1","Tubb1","Tyrobp","Vcan",
+  "Vpreb1a","Vpreb1b","Vwf","Xbp1","Xcr1")
+
+all_marker_genes <- c("Adipoq$","Alas2$","Ank1$","Avp$","Bglap$","Cadm1$","Cd14$","Cd19$",
+  "Cd34$","Cd38$","Cd3d$","Cd3e$","Cd3g$","Cd79a$","Cd79b$","Cdh5$","Clec10a$","Clec4b1$",
+  "Clec4b2$","Clec9a$","Col1a1$","Cpa3$","Csf1r$","Csf3r$","Cx3cr1$","Cxcl12$","Cxcr2$",
+  "Dntt$","Ebf1$","Elane$","Eng$","Epb42$","Fabp4$","Fcer1a$","Fcgr1$","Fcgr4$","Fcna$",
+  "Fcnb$","Flt3$","Gata1$","Gp1ba$","Gypa$","Hba-a1$","Hbb-y$","Hdc$","Hopx$","Ighg1$",
+  "Ighm$","Igll1$","Il3ra$","Il5ra$","Il7r$","Itga2b$","Kdr$","Klf1$","Klrb1a$","Klrd1$",
+  "Lepr$","Lilra6$","Lyz1$","Lyz2$","Mllt3$","Mpo$","Ms4a1$","Ms4a2$","Myh9$","Mzb1$",
+  "Ncam1$","Nkg7$","Nt5e$","Pecam1$","Pf4$","Pparg$","Ppbp$","Prdm1$","Prg2$","Prtn3$",
+  "Ptprc$","Rag1$","Rag2$","Runx2$","S100a8$","S100a9$","Sdc1$","Siglece$","Sp7$","Tacc2$",
+  "Tal1$","Tcf4$","Tfrc$","Thy1$","Tpsab1$","Trac$","Trbc1$","Tubb1$","Tyrobp$","Vcan$",
+  "Vpreb1a$","Vpreb1b$","Vwf$","Xbp1$","Xcr1$")
+
+mx <- rpm[unlist(lapply(all_marker_genes,function(x) {grep(x,rownames(rpm)) } )),]
+rownames(mx) <- sapply(strsplit(rownames(mx)," "),"[[",2)
+colnames(mx) <- ss[match(colnames(rpm),ss$sample_name),"preferred_samplename"]
+mx <- mx[,order(colnames(mx))]
+
+heatmap.2( mx, col=colfunc(25),scale="row",Rowv = FALSE, Colv = FALSE,
+ trace="none",margins = c(7,7), cexRow=.5, cexCol=.6,  main="Marker genes")
+
+```
+
+## Session information
+
+```{r,save}
+
+sessionInfo()
+
+save.image("dge2.Rdata")
+
+```
